@@ -8,6 +8,9 @@
         public string PasswordHash { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        public int RoleId { get; set; }    // Foregin Key
+        public Role Role { get; set; } = null!;  // Navigation Property
+
         // Navigation Property
         public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
     }

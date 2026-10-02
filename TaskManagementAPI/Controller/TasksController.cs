@@ -94,7 +94,7 @@ namespace TaskManagementAPI.Controller
             }
         }
 
-        [HttpPost("{id}")]
+        [HttpPut("{id}")]
         public async Task<IActionResult> UpdateTask(int id, [FromBody] UpdateTaskDto updateTaskDto)
         {
             try
