@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using TaskManagementAPI.Constants;
 using TaskManagementAPI.Data;
 using TaskManagementAPI.Services;
 
@@ -43,6 +44,22 @@ builder.Services.AddAuthentication(options =>
             IssuerSigningKey = new SymmetricSecurityKey(
               Encoding.UTF8.GetBytes(builder.Configuration["JwtSettings:SecretKey"]!))
         };
+    });
+
+// Configure Authorization Policies
+builder.Services.AddAuthorization(options =>
+    {
+    // Admin-only policies
+    options.AddPolicy("AdminOnly", policy =>
+    policy.RequireRole(RoleConstants.Admin));
+
+    // Manager or Admin policy
+    options.AddPolicy("ManagerOrAdmin", policy =>
+    policy.RequireRole(RoleConstants.Admin, RoleConstants.Manager));
+
+    // Any authenticated user (User, Manager, Admin)
+    options.AddPolicy("AuthenticatedUser", policy =>
+    policy.RequireAuthenticatedUser());
     });
 
 var app = builder.Build();

@@ -194,5 +194,113 @@ namespace TaskManagementAPI.Services
             };
 
         }
+
+        public async Task<List<TaskResponseDto>> GetAllTasksAsync()
+        {
+            var tasks = await _context.Tasks
+                .OrderByDescending(t => t.CreatedAt)
+                .Select(t => new TaskResponseDto
+                     {
+                       Id = t.Id,
+                       Title = t.Title,
+                       Description = t.Description,
+                       IsCompleted = t.IsCompleted,
+                       Priority = t.Priority,
+                       DueDate = t.DueDate,
+                       CreatedAt = t.CreatedAt,
+                       UserId = t.UserId
+                    })
+               .ToListAsync();
+
+            return (tasks);
+        }
+
+        public async Task<TaskResponseDto?> GetAnyTaskByIdAsync(int taskId)
+        {
+            var tasks = await _context.Tasks
+                .Where(t => t.Id == taskId)
+                .Select(t => new TaskResponseDto
+                {
+                    Id = t.Id,
+                    Title = t.Title,
+                    Description = t.Description,
+                    IsCompleted = t.IsCompleted,
+                    Priority = t.Priority,
+                    DueDate = t.DueDate,
+                    CreatedAt = t.CreatedAt,
+                    UserId = t.UserId
+                })
+                .FirstOrDefaultAsync();
+
+            return (tasks);
+        }
+
+        public async Task<TaskResponseDto?> UpdateAnyTaskAsync(int taskId, UpdateTaskDto updateTaskDto)
+        {
+            // Find the tasks without filtering the userId
+            var task = await _context.Tasks
+                      .FirstOrDefaultAsync(t => t.Id == taskId);
+
+            if (task == null)
+            {
+                return null;
+            }
+
+            // Update Fields
+            if (updateTaskDto.Title != null)
+            {
+                task.Title = updateTaskDto.Title;
+            }
+
+            if (updateTaskDto.Description != null)
+            {
+                task.Description = updateTaskDto.Description;
+            }
+
+            if(updateTaskDto.IsCompleted.HasValue)
+            {
+                task.IsCompleted = updateTaskDto.IsCompleted.Value;
+            }
+
+            if (updateTaskDto.Priority.HasValue)
+            {
+                task.Priority = updateTaskDto.Priority.Value;
+            }
+
+            if (updateTaskDto.DueDate.HasValue)
+            {
+                task.DueDate = updateTaskDto.DueDate.Value;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return new TaskResponseDto
+            {
+                Id = task.Id,
+                Title = task.Title,
+                Description = task.Description,
+                IsCompleted = task.IsCompleted,
+                Priority = task.Priority,
+                DueDate = task.DueDate,
+                CreatedAt = task.CreatedAt,
+                UserId = task.UserId
+            };
+        }
+
+        public async Task<bool> DeleteAnyTaskAsync(int taskId)
+        {
+            var task = await _context.Tasks
+                .FirstOrDefaultAsync(t => t.Id == taskId);
+
+            if(task == null)
+            {
+                return false;
+            }
+
+            _context.Tasks.Remove(task);
+            await _context.SaveChangesAsync();
+
+            return true;
+        }
     }
 }

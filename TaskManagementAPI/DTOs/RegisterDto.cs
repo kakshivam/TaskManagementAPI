@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using TaskManagementAPI.Constants;
 
 namespace TaskManagementAPI.DTOs
 {
@@ -15,5 +16,8 @@ namespace TaskManagementAPI.DTOs
         [Required(ErrorMessage ="Password is Required")]
         [StringLength(100, MinimumLength =6, ErrorMessage ="Password must be atleast 6 characters")]
         public string Password {  get; set; } = string.Empty;
+
+        // Optional: Allow Role selection during registration (for admin use)
+        public string? Role { get; set; } = RoleConstants.User;    // Will default to "User" if not provided
     }
 }

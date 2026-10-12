@@ -5,6 +5,7 @@ using TaskManagementAPI.DTOs;
 using TaskManagementAPI.Extensions;
 using TaskManagementAPI.Services;
 using TaskManagementAPI.Model;
+using TaskManagementAPI.Constants;
 
 namespace TaskManagementAPI.Controller
 {
@@ -20,6 +21,7 @@ namespace TaskManagementAPI.Controller
             _taskService = taskService;
         }
 
+        // Regular user, Manager, and Admin can create tasks
         [HttpPost]
         public async Task<IActionResult> CreateTask([FromBody] CreateTaskDto createTaskDto)
         {
@@ -43,6 +45,8 @@ namespace TaskManagementAPI.Controller
             }
         }
 
+        // Regular user see only there tasks
+        // Manager and Admin can see there tasks
         [HttpGet]
         public async Task<IActionResult> GetUserTasks()
         {
@@ -51,8 +55,19 @@ namespace TaskManagementAPI.Controller
                 // Get the current user Id from Jwt Toke
                 var userId = User.GetUserId();
 
-                //Get all the task for this user
-                var tasks = await _taskService.GetUserTaskAsync(userId);
+                var userRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+
+                List<TaskResponseDto> tasks;
+
+                //Manager and Admins can see all tasks
+                if(userRole == RoleConstants.Manager || userRole == RoleConstants.Admin)
+                {
+                    tasks = await _taskService.GetAllTasksAsync(); 
+                }
+                else
+                {
+                    tasks = await _taskService.GetUserTaskAsync(userId);
+                }
 
                 return Ok(tasks);
             }
@@ -73,13 +88,22 @@ namespace TaskManagementAPI.Controller
             {
                 // Get the current user Id from Jwt Token
                 var user = User.GetUserId();
+                var userRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 
                 // Get the task (includes Authorization check)
                 var task = await _taskService.GetTaskByIdAsync(id, user);
 
                 if (task == null)
-                {
-                    return NotFound(new { message = "Task not found or you don't have permission to find the task" });
+                 {
+                    // Manager and Admin can view any task
+                    if(userRole == RoleConstants.Manager || userRole == RoleConstants.Admin)
+                    {
+                        task = await _taskService.GetAnyTaskByIdAsync(id);
+                    }
+                    if (task == null)
+                    {
+                        return NotFound(new { message = "Task not found or you don't have permission to find the task" });
+                    }
                 }
 
                 return Ok(task);
@@ -100,11 +124,23 @@ namespace TaskManagementAPI.Controller
             try
             {
                 var userId = User.GetUserId();
-                var task = await _taskService.UpdateTaskAsync(id, updateTaskDto, userId);
+                var userRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 
-                if(task== null)
+                // Only Admins can update other users tasks
+                TaskResponseDto? task;
+
+                if(userRole == RoleConstants.Admin)
                 {
-                    return NotFound(new { message = "Task not found or you don't have permission to change it" });
+                    task = await _taskService.UpdateAnyTaskAsync(id, updateTaskDto);
+                }
+                else
+                {
+                    task = await _taskService.UpdateTaskAsync(id, updateTaskDto, userId);
+                }
+
+                if(task == null)
+                {
+                    return NotFound(new { message = "Task not found or you don't have permission to update it" });
                 }
 
                 return Ok(task);
@@ -120,14 +156,16 @@ namespace TaskManagementAPI.Controller
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Policy ="AdminOnly")]                    // Explicit admin-only authorization
         public async Task<IActionResult> DeleteTask(int id)
         {
             try
             {
                 var userId = User.GetUserId();
-                var success = await _taskService.DeleteTaskAsync(id, userId);
+                //var success = await _taskService.DeleteTaskAsync(id, userId);
+                var success = await _taskService.DeleteAnyTaskAsync(id);
 
-                if(!success)
+                if (!success)
                 {
                     return NotFound(new { message = "Task not found or you don't have permission to delete it" });
                 }

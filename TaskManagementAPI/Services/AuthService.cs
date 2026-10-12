@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using TaskManagementAPI.Constants;
 using TaskManagementAPI.Data;
 using TaskManagementAPI.DTOs;
 using TaskManagementAPI.Model;
@@ -22,47 +23,49 @@ namespace TaskManagementAPI.Services
         }
         public async Task<UserResponseDto> RegisterAsync(RegisterDto registerDto)
         {
-            // Check if the user already exists
-            var existingUser = await _context.Users
-                .FirstOrDefaultAsync(u => u.Email == registerDto.Email ||
-                                u.Username == registerDto.Username);
+            return await RegisterWithRoleAsync(registerDto, registerDto.Role);
 
-            if (existingUser != null)
-            {
-                throw new InvalidOperationException("User with this email and username already exists");
-            }
+            //// Check if the user already exists
+            //var existingUser = await _context.Users
+            //    .FirstOrDefaultAsync(u => u.Email == registerDto.Email ||
+            //                    u.Username == registerDto.Username);
 
-            // Hash the password
-            var passwordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password);
+            //if (existingUser != null)
+            //{
+            //    throw new InvalidOperationException("User with this email and username already exists");
+            //}
 
-            // Create new User
-            var user = new User
-            {
-                Username = registerDto.Username,
-                Email = registerDto.Email,
-                PasswordHash = passwordHash,
-                CreatedAt = DateTime.UtcNow
-            };
+            //// Hash the password
+            //var passwordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password);
 
-            // Add to Database
-            _context.Users.Add(user);  // in memory insertion
-            await _context.SaveChangesAsync(); // persist to database
+            //// Create new User
+            //var user = new User
+            //{
+            //    Username = registerDto.Username,
+            //    Email = registerDto.Email,
+            //    PasswordHash = passwordHash,
+            //    CreatedAt = DateTime.UtcNow
+            //};
 
-            //Return response DTO(no password)
-            return new UserResponseDto
-            {
-                Id= user.Id,
-                UserName = user.Username,
-                Email = user.Email,
-                CreatedAt = user.CreatedAt
-            };
+            //// Add to Database
+            //_context.Users.Add(user);  // in memory insertion
+            //await _context.SaveChangesAsync(); // persist to database
 
+            ////Return response DTO(no password)
+            //return new UserResponseDto
+            //{
+            //    Id= user.Id,
+            //    UserName = user.Username,
+            //    Email = user.Email,
+            //    CreatedAt = user.CreatedAt
+            //};
         }
 
         public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto)
         {
             // Find the user exist
             var user = await _context.Users
+                 .Include(u=>u.Role)     // Eager load the role
                  .FirstOrDefaultAsync(u => u.Email == loginDto.Email);
 
             // Check if the user exists
@@ -92,9 +95,64 @@ namespace TaskManagementAPI.Services
                     Id = user.Id,
                     UserName= user.Username,
                     Email = user.Email,
-                    CreatedAt = user.CreatedAt
+                    CreatedAt = user.CreatedAt,
+                    Role = user.Role.Name
                 },
                 ExpiresAt = expireAt
+            };
+        }
+
+        public async Task<UserResponseDto> RegisterWithRoleAsync(RegisterDto registerDto, string roleName)
+        {
+            // check if the user exist
+            var existingUser = await _context.Users
+               .FirstOrDefaultAsync(u => u.Email == registerDto.Email ||
+                                      u.Username == registerDto.Username);
+
+            if (existingUser != null)
+            {
+                throw new InvalidOperationException("User with this email or username already exists");
+            }
+
+            // Get the role
+            var role = await _context.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
+            if (role == null)
+            {
+                // Default to User Role if specific role doesn't exits
+                role = await _context.Roles.FirstOrDefaultAsync(r => r.Name == RoleConstants.User);
+                if (role == null)
+                {
+                    throw new InvalidOperationException("Default User Role not found. Please ensure role are seen");
+                }
+            }
+
+            // Hash the password
+            var passwordHash = BCrypt.Net.BCrypt.HashPassword(registerDto.Password);
+
+            var user = new User
+            {
+                Username = registerDto.Username,
+                Email = registerDto.Email,
+                PasswordHash = passwordHash,
+                RoleId = role.Id,   // Assign role
+                CreatedAt = DateTime.UtcNow
+            };
+
+            // Add to database
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+
+            // Load the role navigation property
+            await _context.Entry(user).Reference(u => u.Role).LoadAsync();
+
+            // Return response Dto
+            return new UserResponseDto
+            {
+                Id = user.Id,
+                UserName = user.Username,
+                Email = user.Email,
+                CreatedAt = user.CreatedAt,
+                Role = user.Role.Name     // Include role
             };
         }
 
@@ -116,6 +174,7 @@ namespace TaskManagementAPI.Services
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
+                new Claim(ClaimTypes.Role, user.Role.Name),     // Add role claim
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) 
             };
 
