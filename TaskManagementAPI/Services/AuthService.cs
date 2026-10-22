@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.Storage.Json;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using TaskManagementAPI.Constants;
 using TaskManagementAPI.Data;
@@ -61,7 +62,7 @@ namespace TaskManagementAPI.Services
             //};
         }
 
-        public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto)
+        public async Task<LoginResponseDto> LoginAsync(LoginDto loginDto, string ipAddress)
         {
             // Find the user exist
             var user = await _context.Users
@@ -82,14 +83,32 @@ namespace TaskManagementAPI.Services
                 throw new UnauthorizedAccessException("Invalid email or password");
             }
 
-            // Generate JWT Toke
-            var token = GenerateJwtToken(user);
-            var expireAt = DateTime.UtcNow.AddMinutes(double.Parse(_configration["JwtSettings:ExpiryMinutes"]!));
+            //// Generate JWT Toke
+            //var token = GenerateJwtToken(user);
+            //var expireAt = DateTime.UtcNow.AddMinutes(double.Parse(_configration["JwtSettings:ExpiryMinutes"]!));
+
+            // Generate Token
+            var accessToken = GenerateAccessToken(user);
+            var refreshToken = GenerateRefreshToken(ipAddress);
+
+            // Save refresh token to database
+            refreshToken.UserId = user.Id;
+            _context.RefreshTokens.Add(refreshToken);
+
+            // Remove old/inactive refresh tokens for this user (optional cleanup)
+            await RemoveOldRefreshTokens(user.Id);
+
+            await _context.SaveChangesAsync();
+
+            var accessTokenExpiry = DateTime.UtcNow.AddMinutes(
+                double.Parse(_configration["JwtSettings:AccessTokenExpiryMinutes"]!));
+
 
             // Return login response
             return new LoginResponseDto
             {
-                Token = token,
+                AccessToken = accessToken,
+                RefreshToken = refreshToken.Token,
                 User = new UserResponseDto
                 {
                     Id = user.Id,
@@ -98,7 +117,9 @@ namespace TaskManagementAPI.Services
                     CreatedAt = user.CreatedAt,
                     Role = user.Role.Name
                 },
-                ExpiresAt = expireAt
+                AccessTokenExpiresAt = accessTokenExpiry,
+                RefreshTokenExpiresAt = refreshToken.ExpiresAt
+
             };
         }
 
@@ -156,13 +177,108 @@ namespace TaskManagementAPI.Services
             };
         }
 
-        private string GenerateJwtToken(User user)
+        public async Task<RefreshTokenResponseDto> RefreshTokenAsync(string token, string ipAddress)
+        {
+            var user = await GetUserByRefreshToken(token);
+            var refreshToken = user.RefreshTokens.Single(rt => rt.Token == token);
+
+            if(!refreshToken.IsActive)
+            {
+                throw new UnauthorizedAccessException("Invalid or expired refresh token"); 
+            }
+
+            // Generate new tokens,
+            var newAccessToken = GenerateAccessToken(user);
+            var newRefreshToken = GenerateRefreshToken(ipAddress);
+            newRefreshToken.UserId = user.Id;
+
+            // Mark Old refresh token as replaced
+            refreshToken.RevokedAt = DateTime.UtcNow;
+            refreshToken.RevokedByIp = ipAddress;
+            refreshToken.ReplacedByToken = newRefreshToken.Token;
+
+            // Save new Refresh Token
+            _context.RefreshTokens.Add(newRefreshToken);
+
+            // Remove Old Refresh Token
+            await RemoveOldRefreshTokens(user.Id);
+
+            await _context.SaveChangesAsync();
+
+            var accessTokenExpiry = DateTime.UtcNow.AddMinutes(
+                double.Parse(_configration["JwtSettings:AccessTokenExpiryMinutes"]!));
+
+            return new RefreshTokenResponseDto
+            {
+                AccessToken = newAccessToken,
+                RefreshToken = newRefreshToken.Token,
+                AccessTokenExpiresAt = accessTokenExpiry,
+                RefreshTokenExpiresAt = newRefreshToken.ExpiresAt
+            };
+        }
+
+        public async Task<bool> RevokeTokenAsync(string token, string ipAddress)
+        {
+            var user = await GetUserByRefreshToken(token);
+            var refreshToken = user.RefreshTokens.Single(rt => rt.Token == token);
+
+            if (!refreshToken.IsActive)
+            {
+                return false;
+            }
+
+            // Revoke token
+            refreshToken.RevokedAt = DateTime.Now;
+            refreshToken.RevokedByIp = ipAddress;
+
+            await _context.SaveChangesAsync();
+
+            return true;
+        }
+
+        //private string GenerateJwtToken(User user)
+        //{
+        //    //Get JWT setting from configuration
+        //    var secretKey = _configration["JwtSettings:SecretKey"];
+        //    var issuer = _configration["JwtSettings:Issuer"];
+        //    var audience = _configration["JwtSettings:Audience"];
+        //    var expiryMinutes = double.Parse(_configration["JwtSettings:ExpiryMinutes"]!);
+
+        //    // Create Secret Key
+        //    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!));
+        //    var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        //    // Define claims (user information to include in token)
+        //    var claims = new[]
+        //    {
+        //        new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+        //        new Claim(JwtRegisteredClaimNames.Email, user.Email),
+        //        new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
+        //        new Claim(ClaimTypes.Role, user.Role.Name),     // Add role claim
+        //        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) 
+        //    };
+
+        //    // Create Token
+        //    var token = new JwtSecurityToken(
+        //        issuer: issuer,
+        //        audience: audience,
+        //        claims: claims,
+        //        expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
+        //        signingCredentials: credentials
+        //        );
+
+        //    // Return token as string
+        //    return new JwtSecurityTokenHandler().WriteToken(token);
+        //}
+
+
+        private string GenerateAccessToken(User user)
         {
             //Get JWT setting from configuration
             var secretKey = _configration["JwtSettings:SecretKey"];
             var issuer = _configration["JwtSettings:Issuer"];
             var audience = _configration["JwtSettings:Audience"];
-            var expiryMinutes = double.Parse(_configration["JwtSettings:ExpiryMinutes"]!);
+            var expiryMinutes = double.Parse(_configration["JwtSettings:AccessTokenExpiryMinutes"]!);
 
             // Create Secret Key
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!));
@@ -171,12 +287,12 @@ namespace TaskManagementAPI.Services
             // Define claims (user information to include in token)
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email),
-                new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
-                new Claim(ClaimTypes.Role, user.Role.Name),     // Add role claim
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) 
-            };
+                    new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                    new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                    new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
+                    new Claim(ClaimTypes.Role, user.Role.Name),     // Add role claim
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                };
 
             // Create Token
             var token = new JwtSecurityToken(
@@ -189,6 +305,56 @@ namespace TaskManagementAPI.Services
 
             // Return token as string
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        private RefreshToken GenerateRefreshToken(string ipAddress)
+        {
+            var refreshTokenExpiry = double.Parse(_configration["JwtSettings:RefreshTokenExpiryDays"]!);
+
+            // Generate cryptographically secure random token
+            var randomBytes = new byte[64];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomBytes);
+            var token = Convert.ToBase64String(randomBytes);
+
+            return new RefreshToken
+            {
+                Token = token,
+                ExpiresAt = DateTime.UtcNow.AddDays(refreshTokenExpiry),
+                CreatedAt = DateTime.UtcNow,
+                CreatedByIp = ipAddress,
+            };
+        }
+
+        private async Task RemoveOldRefreshTokens(int userId)
+        {
+            // Remove refresh tokens that are expired or revoked and older than 30 days
+            var tokensToRemove = await _context.RefreshTokens
+                      .Where(rt => rt.UserId == userId &&
+                                 // !rt.IsActive &&
+                                 rt.RevokedAt != null &&
+                                 rt.CreatedAt.AddDays(30) < DateTime.UtcNow)
+                      .ToListAsync();
+
+            if(tokensToRemove.Any())
+            {
+                _context.RefreshTokens.RemoveRange(tokensToRemove);
+            }
+        }
+
+        private async Task<User> GetUserByRefreshToken(string token)
+        {
+            var user = await _context.Users
+                      .Include(u => u.Role)
+                      .Include(u => u.RefreshTokens)
+                      .SingleOrDefaultAsync(u => u.RefreshTokens.Any(rt => rt.Token == token));
+
+            if (user == null)
+            {
+                throw new UnauthorizedAccessException("Invalid refresh token");
+            }
+
+            return user;
         }
     }
 }

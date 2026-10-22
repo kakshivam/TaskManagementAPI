@@ -13,6 +13,7 @@ namespace TaskManagementAPI.Data
         public DbSet<User> Users { get; set; }
         public DbSet<TaskItem> Tasks { get; set; }
         public DbSet<Role> Roles {  get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -48,6 +49,11 @@ namespace TaskManagementAPI.Data
             //modelBuilder.Entity<Role>()
             //    .Property(r => r.CreatedAt)
             //    .HasDefaultValueSql("GETUTCDATE()");
+
+            // Index on the refresh token for fast lookup(NEW)
+            modelBuilder.Entity<RefreshToken>()
+                .HasIndex(rt => rt.Token)
+                .IsUnique();
 
             // See the default role
             modelBuilder.Entity<Role>().HasData(
