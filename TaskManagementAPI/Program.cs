@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using TaskManagementAPI.Constants;
 using TaskManagementAPI.Data;
+using TaskManagementAPI.Repositories;
 using TaskManagementAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +19,22 @@ builder.Services.AddOpenApi();
 // Add DbContext 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// --------------------------------------------------
+// REPOSITORY REGISTRATION
+// Order: Generic first, then specific repositories
+// --------------------------------------------------
+// Generic repository - available for any entity type if needed
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+
+// User repository - used by AuthService
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+// Task repository - used by TaskService
+builder.Services.AddScoped<ITaskRepository, TaskRepository>();
+
+// RefreshToken repository - used by AuthService
+builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 
 // Register Auth Service
 builder.Services.AddScoped<IAuthService, AuthService>();
